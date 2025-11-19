@@ -4,6 +4,12 @@ on:
   push:
     branches: [ main ]
 
+# 必要な権限を明示（Pages のデプロイに必須）
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
