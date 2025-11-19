@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <title>スマホボール転がしゲーム</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            background: #222;
+            color: white;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start; /* 上部に寄せる */
+            height: 100vh;
+            margin: 0;
+            padding-top: 20px;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            font-size: 1.5em;
+        }
+
+        #gameCanvas {
+            border: 2px solid #4285f4;
+            background-color: #333;
+            box-shadow: 0 0 15px rgba(66, 133, 244, 0.5);
+            margin-bottom: 20px;
+        }
+
+        #message, #score {
+            margin-top: 10px;
+            font-size: 1.2em;
+        }
+
+        button {
+            padding: 10px 20px;
+            font-size: 1em;
+            background-color: #4285f4;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+        }
+
+        button:active {
+            background-color: #357ae8;
+        }
+
+        /* 画面を縦向きに固定するCSS（任意） */
+        @media screen and (orientation: landscape) {
+            body::before {
+                content: "スマートフォンを縦向きにしてプレイしてください。";
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.9);
+                color: white;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 1.5em;
+                z-index: 1000;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <h1>📱 ボール転がしゲーム</h1>
+    <p id="message">センサーを有効にして、スマホを傾けてボールを操作！</p>
+    <p id="score">スコア: 0</p>
+
+    <canvas id="gameCanvas" width="300" height="400"></canvas>
+    
+    <button id="enable-btn">センサーを有効にする</button>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const enableBtn = document.getElementById('enable-btn');
+        const messageDisplay = document.getElementById('message');
+        const scoreDisplay = document.getElementById('score');
+
+        // --- ゲーム定数 ---
+        const BALL_RADIUS = 10;
+        const GRAVITY_MULTIPLIER = 0.5; // 傾きに対する感度
+        const FRICTION = 0.98; // 摩擦による減衰
+        const WALL_BOUNCE = 0.7; // 壁の反発係数
+
+        // --- ゲーム変数 ---
+        let ballX = canvas.width / 2;
+        let ballY = canvas.height / 2;
+        let velocityX = 0;
+        let velocityY = 0;
+        let accelerationX = 0;
+        let accelerationY = 0;
+        let gameLoopId;
+        let score = 0;
+        let obstacle = createRandomObstacle(); // 障害物
+        let target = createRandomTarget(); // ゴール
+
+        // --- Device Orientation イベントハンドラ ---
+        function handleOrientation(event) {
+            // beta: X軸（前後）、gamma: Y軸（左右）を使用
+            const beta = event.beta || 0; 
+            const gamma = event.gamma || 0;
+
+            // 傾きを加速度に変換
+            // beta (前後傾き) は Y軸の動き
+            // gamma (左右傾き) は X軸の動き
+            // 係数を掛けて感度を調整
+            accelerationX = gamma * GRAVITY_MULTIPLIER;
+            accelerationY = beta * GRAVITY_MULTIPLIER; 
+
+            // スマートフォンを縦向きに持つことを前提とする
+            // 画面を平らに置いた状態（beta=0, gamma=0）が中心
+        }
+
+        // --- ゲーム要素の初期化/生成 ---
+
+        // 障害物をランダムな位置に生成
+        function createRandomObstacle() {
+            const size = 30;
+            const padding = 50;
+            return {
+                x: Math.random() * (canvas.width - size - padding * 2) + padding,
+                y: Math.random() * (canvas.height - size - padding * 2) + padding,
+                width: size,
+                height: 10,
+                color: 'red'
+            };
+        }
+
+        // ゴールをランダムな位置に生成
+        function createRandomTarget() {
+            const radius = 15;
+            const padding = 50;
+             let x, y;
+             do {
+                x = Math.random() * (canvas.width - radius * 2 - padding * 2) + padding + radius;
+                y = Math.random() * (canvas.height - radius * 2 - padding * 2) + padding + radius;
+             } while (checkCollision(x, y, radius, obstacle)); // 障害物と重ならないように
+            
+            return {
+                x: x,
+                y: y,
+                radius: radius,
+                color: 'green'
+            };
+        }
+
+        // 衝突判定ヘルパー (ボールと四角形)
+        function checkCollision(ballX, ballY, ballR, rect) {
+             const closestX = Math.max(rect.x, Math.min(ballX, rect.x + rect.width));
+             const closestY = Math.max(rect.y, Math.min(ballY, rect.y + rect.height));
+             const distanceX = ballX - closestX;
+             const distanceY = ballY - closestY;
+             return (distanceX * distanceX + distanceY * distanceY) < (ballR * ballR);
+        }
+
+        // --- 描画関数 ---
+
+        // ボールの描画
+        function drawBall() {
+            ctx.beginPath();
+            ctx.arc(ballX, ballY, BALL_RADIUS, 0, Math.PI * 2);
+            ctx.fillStyle = '#f9e710';
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        // 障害物（四角形）の描画
+        function drawObstacle() {
+            ctx.fillStyle = obstacle.color;
+            ctx.fillRect(obstacle.x, obstacle.y, obstacle.width, obstacle.height);
+        }
+
+        // ゴール（円）の描画
+        function drawTarget() {
+            ctx.beginPath();
+            ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
+            ctx.fillStyle = target.color;
+            ctx.fill();
+            ctx.closePath();
+        }
+
+        // --- メインゲームロジック ---
+        function updateGame() {
+            // 速度に加速度を適用
+            velocityX += accelerationX * 0.05; // 調整用の係数
+            velocityY += accelerationY * 0.05; // 調整用の係数
+
+            // 摩擦による減衰
+            velocityX *= FRICTION;
+            velocityY *= FRICTION;
+
+            // 位置の更新
+            ballX += velocityX;
+            ballY += velocityY;
+
+            // 1. 壁との衝突判定と反発
+            
+            // X軸方向（左右の壁）
+            if (ballX + BALL_RADIUS > canvas.width || ballX - BALL_RADIUS < 0) {
+                // ボールを壁の内側に押し戻す
+                if (ballX + BALL_RADIUS > canvas.width) {
+                    ballX = canvas.width - BALL_RADIUS;
+                } else if (ballX - BALL_RADIUS < 0) {
+                    ballX = BALL_RADIUS;
+                }
+                // 速度を反転させ、反発係数を掛ける
+                velocityX = -velocityX * WALL_BOUNCE;
+            }
+
+            // Y軸方向（上下の壁）
+            if (ballY + BALL_RADIUS > canvas.height || ballY - BALL_RADIUS < 0) {
+                 // ボールを壁の内側に押し戻す
+                if (ballY + BALL_RADIUS > canvas.height) {
+                    ballY = canvas.height - BALL_RADIUS;
+                } else if (ballY - BALL_RADIUS < 0) {
+                    ballY = BALL_RADIUS;
+                }
+                // 速度を反転させ、反発係数を掛ける
+                velocityY = -velocityY * WALL_BOUNCE;
+            }
+
+
+            // 2. 障害物との衝突判定（単純な衝突で処理はスキップ）
+            if (checkCollision(ballX, ballY, BALL_RADIUS, obstacle)) {
+                // 衝突したら、一旦速度をゼロにして動きを止める（シンプル化）
+                // より高度な物理演算が必要な場合は、衝突時の法線ベクトルに基づいた反射処理が必要
+                velocityX = 0;
+                velocityY = 0;
+                messageDisplay.textContent = '⛔ 障害物にぶつかりました！';
+            }
+
+
+            // 3. ゴールとの衝突判定
+            const targetDistance = Math.sqrt(
+                (ballX - target.x) ** 2 + (ballY - target.y) ** 2
+            );
+            if (targetDistance < BALL_RADIUS + target.radius) {
+                // ゴール！
+                score += 1;
+                scoreDisplay.textContent = `スコア: ${score}`;
+                messageDisplay.textContent = '🎉 ゴール！次のステージへ...';
+                
+                // 次のステージの初期化
+                ballX = canvas.width / 2;
+                ballY = canvas.height / 2;
+                velocityX = 0;
+                velocityY = 0;
+                obstacle = createRandomObstacle();
+                target = createRandomTarget();
+            }
+
+            // 画面の再描画
+            ctx.clearRect(0, 0, canvas.width, canvas.height); // キャンバスをクリア
+            drawObstacle();
+            drawTarget();
+            drawBall();
+            
+            gameLoopId = requestAnimationFrame(updateGame);
+        }
+
+        // --- センサー有効化とゲーム開始 ---
+        function enableSensor() {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                // iOS対応: 権限リクエスト
+                DeviceOrientationEvent.requestPermission().then(state => {
+                    if (state === 'granted') {
+                        startListening();
+                    } else {
+                        alert('センサーアクセスが拒否されました。ゲームを開始できません。');
+                    }
+                }).catch(error => {
+                     alert('センサーアクセスに失敗しました: ' + error.message);
+                });
+            } else {
+                // Androidなど: そのままリスナーを登録
+                startListening();
+            }
+        }
+        
+        function startListening() {
+            window.addEventListener('deviceorientation', handleOrientation);
+            messageDisplay.textContent = 'ゲーム開始！スマホを傾けてボールを動かそう！';
+            enableBtn.style.display = 'none'; // ボタンを非表示にする
+            if (!gameLoopId) {
+                // ゲームループ開始
+                gameLoopId = requestAnimationFrame(updateGame);
+            }
+        }
+
+
+        document.addEventListener('DOMContentLoaded', () => {
+            // ゲーム開始ボタンにイベントリスナーを設定
+            enableBtn.addEventListener('click', enableSensor);
+
+            // 初回描画
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            drawObstacle();
+            drawTarget();
+            drawBall();
+        });
+
+    </script>
+</body>
+</html>
